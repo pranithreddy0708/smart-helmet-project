@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🏍️ AI-Powered Smart Helmet Bike Ignition System
 
 > **Final Year Engineering Project** | AI · IoT · Computer Vision · Embedded Systems
@@ -141,3 +142,6 @@ When connecting to a real motorcycle:
 ---
 
 *Submitted for B.E. Final Year Project | Electronics/Computer Science Engineering*
+=======
+# smart-helmet-project
+>>>>>>> 9b87764d35d95a672f0c6e216f20b9afb20e6985
