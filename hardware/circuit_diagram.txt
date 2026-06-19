@@ -1,0 +1,146 @@
+SMART HELMET BIKE IGNITION SYSTEM
+Hardware Circuit Diagram
+=======================================================
+
+FULL SYSTEM BLOCK DIAGRAM
+──────────────────────────
+
+    ┌─────────┐       USB / CSI        ┌─────────────────────────┐
+    │  CAMERA │ ────────────────────▶  │     RASPBERRY PI 4      │
+    │ 720p/   │                        │   ┌─────────────────┐   │
+    │ 1080p   │                        │   │  YOLOv8 Model   │   │
+    └─────────┘                        │   │  helmet_detect  │   │
+                                        │   └────────┬────────┘   │
+    ┌─────────┐     WiFi (MQTT)        │            │ Serial      │
+    │ MOBILE  │ ◀───────────────────── │            │ UART        │
+    │   APP   │                        └────────────┼────────────┘
+    └─────────┘                                     │
+                                                    ▼
+    ┌─────────────────────────────────────────────────────────┐
+    │                      ESP32 DevKit V1                    │
+    │                                                         │
+    │  GPIO26 ──▶ Relay     GPIO25 ──▶ Green LED              │
+    │  GPIO33 ──▶ Red LED   GPIO32 ──▶ Buzzer                 │
+    │  GPIO21 ──▶ LCD SDA   GPIO22 ──▶ LCD SCL                │
+    └────────────────────────┬────────────────────────────────┘
+                             │
+                    ┌────────▼────────┐
+                    │   RELAY MODULE  │
+                    │  COM  NO   NC   │
+                    └──┬────┬────┘
+                       │    │
+    12V BATTERY (+) ───┘    └──── IGNITION WIRE
+                                  (to starter motor circuit)
+    12V BATTERY (−) ──────────── Common GND
+
+=======================================================
+ESP32 DETAILED WIRING DIAGRAM
+=======================================================
+
+ESP32 DevKit V1                    Peripherals
+═══════════════════════════════════════════════
+
+3.3V ────────────────────────────── LCD VCC
+GND  ────────────────────────────── LCD GND
+GPIO 21 (SDA) ──────────────────── LCD SDA (pin 4)
+GPIO 22 (SCL) ──────────────────── LCD SCL (pin 3)
+
+GPIO 25 ──[R: 220Ω]── Green LED (+)
+                       Green LED (−) ── GND
+
+GPIO 33 ──[R: 220Ω]── Red LED (+)
+                       Red LED (−) ── GND
+
+GPIO 32 ────────────────────────── Buzzer (+)
+GND  ────────────────────────────── Buzzer (−)
+
+5V   ────────────────────────────── Relay VCC (JD-VCC or VCC)
+GND  ────────────────────────────── Relay GND
+GPIO 26 ────────────────────────── Relay IN
+
+=======================================================
+RELAY TO MOTORCYCLE WIRING
+=======================================================
+
+                    RELAY MODULE
+                 ┌──────────────┐
+  ESP32 GPIO26 ──┤ IN           │
+  5V ────────────┤ VCC          │
+  GND ───────────┤ GND          │
+                 │              │
+  Bat(+) ────────┤ COM    NO ───┼──── Ignition wire
+                 │        NC    │     (to ECU / CDI)
+                 └──────────────┘
+
+  Motorcycle Battery:
+  (+12V) ─── Blade fuse (5A) ─── Relay COM
+  (GND)  ─── ESP32 GND, RPi GND (common ground)
+
+=======================================================
+RASPBERRY PI 4 TO ESP32 SERIAL CONNECTION
+=======================================================
+
+  Raspberry Pi 4               ESP32 DevKit
+  GPIO 14 (TX) ────────────── GPIO 3 (RX)
+  GPIO 15 (RX) ────────────── GPIO 1 (TX)
+  GND          ────────────── GND
+
+  ⚠ NOTE: RPi GPIO is 3.3V. ESP32 RX is 3.3V tolerant.
+    No level shifter needed for this direction.
+    If using 5V ESP32 modules, add voltage divider on TX→RX.
+
+=======================================================
+POWER SUPPLY OPTIONS
+=======================================================
+
+OPTION A — Power Bank (prototyping):
+  Power Bank (5V 3A USB-C) ──── Raspberry Pi 4 (USB-C)
+  Raspberry Pi 4 (USB-A) ─────── ESP32 (USB)
+
+OPTION B — Motorcycle Battery (permanent):
+  Bike 12V Battery (+) ──── Buck Converter IN(+)
+  Bike 12V GND ──────────── Buck Converter IN(-)
+  Buck Converter OUT(+) ─── RPi 5V (GPIO pin 2)
+  Buck Converter OUT(-) ─── RPi GND (GPIO pin 6)
+
+  Use: XL4016 or LM2596 Buck Converter (12V → 5V/3A)
+
+=======================================================
+LCD I2C 16×2 PINOUT
+=======================================================
+
+  LCD I2C Backpack        ESP32
+  ─────────────────────────────
+  Pin 1: GND ──────────── GND
+  Pin 2: VCC ──────────── 3.3V
+  Pin 3: SDA ──────────── GPIO 21
+  Pin 4: SCL ──────────── GPIO 22
+
+  I2C Address: Usually 0x27 (check with I2C scanner)
+  Library: LiquidCrystal_I2C
+
+=======================================================
+COMPONENT PLACEMENT ON BIKE
+=======================================================
+
+    [HELMET / RIDER]
+         │
+         │  (camera faces rider's head)
+         ▼
+    ┌─────────┐
+    │  CAMERA │  ← Mount: handlebar or mirror stem
+    └────┬────┘
+         │ USB
+    ┌────▼────────────────┐
+    │  RASPBERRY PI 4     │  ← Mount: under seat / in tank bag
+    │  + Power Bank       │    (weatherproof enclosure)
+    └────┬────────────────┘
+         │ Serial/USB
+    ┌────▼────────────────┐
+    │  ESP32 + Relay      │  ← Mount: near ignition ECU
+    │  + LCD (optional)   │    in existing electrical tray
+    └────┬────────────────┘
+         │ Relay contacts
+    ┌────▼────────────────┐
+    │  IGNITION CIRCUIT   │  ← Existing bike wiring
+    └─────────────────────┘

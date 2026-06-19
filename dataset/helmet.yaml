@@ -1,0 +1,12 @@
+# Helmet Detection Dataset Configuration
+# Classes MUST match your model exactly
+
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test
+
+nc: 2
+names:
+  0: helmet
+  1: no_helmet

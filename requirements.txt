@@ -1,0 +1,36 @@
+# Smart Helmet Bike Ignition System
+# Python Dependencies
+# Install: pip install -r requirements.txt --break-system-packages
+
+# ── Core Computer Vision ──────────────────────
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# ── AI / Deep Learning ───────────────────────
+ultralytics>=8.0.0          # YOLOv8
+# torch>=2.0.0              # Auto-installed with ultralytics
+# torchvision>=0.15.0       # Auto-installed with ultralytics
+
+# TensorFlow Lite (choose one):
+# tflite-runtime>=2.13.0    # Lightweight (Raspberry Pi)
+# tensorflow>=2.13.0        # Full (for training on PC/Laptop)
+
+# ── Serial / IoT ─────────────────────────────
+pyserial>=3.5
+paho-mqtt>=1.6.1
+
+# ── Data Augmentation ────────────────────────
+albumentations>=1.3.0
+
+# ── Dataset Download ─────────────────────────
+roboflow>=1.1.0
+
+# ── Testing / Monitoring ─────────────────────
+psutil>=5.9.0
+
+# ── Optional: Logging / Dashboard ────────────
+# flask>=3.0.0              # Web dashboard alternative
+# streamlit>=1.28.0         # Easy web UI for Pi
+
+# ── YAML ──────────────────────────────────────
+pyyaml>=6.0.1
