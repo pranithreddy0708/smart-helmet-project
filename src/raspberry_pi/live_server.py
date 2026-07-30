@@ -3,10 +3,10 @@ Smart Helmet System — Live Web Streaming Server
 Streams real-time YOLOv8 helmet detection feed via HTTP MJPEG.
 
 Usage:
-    python src/raspberry_pi/live_server.py --port 5000
+    python src/raspberry_pi/live_server.py --port 6000
 
 Access in browser:
-    http://localhost:5000 or http://<IP-ADDRESS>:5000
+    http://localhost:6000 or http://<IP-ADDRESS>:6000
 """
 
 import cv2
@@ -138,7 +138,7 @@ class StreamHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description="Live Web Streaming Server")
     parser.add_argument("--host", default="0.0.0.0", help="Host IP to bind server to")
-    parser.add_argument("--port", type=int, default=5000, help="Port to run server on")
+    parser.add_argument("--port", type=int, default=6000, help="Port to run server on")
     args = parser.parse_args()
 
     load_detection_model()
