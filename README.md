@@ -48,10 +48,10 @@ python src/raspberry_pi/setup_model.py --skip-camera-test
 ### 3. Run Live Web Server (HTTP Video Stream)
 Start the real-time MJPEG live web streaming server to view detection in your browser or remote dashboard:
 ```bash
-python src/raspberry_pi/live_server.py --port 6000
+python src/raspberry_pi/live_server.py --port 8080
 ```
-- Open browser locally: **`http://localhost:6000`**
-- Open from mobile device / network: **`http://<RASPBERRY_PI_IP>:6000`**
+- Open browser locally: **`http://localhost:8080`**
+- Open from mobile device / network: **`http://<RASPBERRY_PI_IP>:8080`**
 
 ### 4. Run Desktop Detection System
 ```bash
@@ -117,7 +117,7 @@ The included Live Web Server (`live_server.py`) enables real-time monitoring ove
 | Ignition Response Time | < 1 second |
 | Power Consumption | ~5W |
 | Offline Operation | ✅ Yes |
-| Live Web Streaming | ✅ http://localhost:6000 |
+| Live Web Streaming | ✅ http://localhost:8080 |
 
 ---
 
