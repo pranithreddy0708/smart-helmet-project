@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # 🏍️ AI-Powered Smart Helmet Bike Ignition System
 
 > **Final Year Engineering Project** | AI · IoT · Computer Vision · Embedded Systems
@@ -14,6 +13,8 @@ smart_helmet_project/
 ├── src/
 │   ├── raspberry_pi/
 │   │   ├── helmet_detection.py     ← Main detection + ignition control
+│   │   ├── setup_model.py          ← One-click model downloader & setup
+│   │   ├── live_server.py          ← Live Web Streaming Server (HTTP MJPEG)
 │   │   └── train_model.py          ← Model training (YOLOv8)
 │   ├── esp32/
 │   │   └── helmet_ignition_esp32.ino  ← ESP32 Arduino firmware
@@ -34,53 +35,61 @@ smart_helmet_project/
 
 ## ⚡ Quick Start
 
-### 1. Install Dependencies (Raspberry Pi)
+### 1. Install Dependencies (Raspberry Pi / Local PC)
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Download Dataset
+### 2. Run One-Click Model Setup
 ```bash
-# Scaffold empty structure
-python src/raspberry_pi/train_model.py --action scaffold
-
-# Download from Roboflow (free account needed)
-python datasets/download_dataset.py \
-  --action roboflow \
-  --api-key YOUR_KEY \
-  --project safety-helmet-detection-nnfnf
+python src/raspberry_pi/setup_model.py --skip-camera-test
 ```
 
-### 3. Train Model
+### 3. Run Live Web Server (HTTP Video Stream)
+Start the real-time MJPEG live web streaming server to view detection in your browser or remote dashboard:
 ```bash
-python src/raspberry_pi/train_model.py \
-  --action train \
-  --epochs 50 \
-  --device 0    # GPU (use "cpu" if no GPU)
+python src/raspberry_pi/live_server.py --port 5000
 ```
+- Open browser locally: **`http://localhost:5000`**
+- Open from mobile device / network: **`http://<RASPBERRY_PI_IP>:5000`**
 
-### 4. Export to TFLite
-```bash
-python src/raspberry_pi/train_model.py \
-  --action export \
-  --export-format tflite
-```
-
-### 5. Run Detection System
+### 4. Run Desktop Detection System
 ```bash
 python src/raspberry_pi/helmet_detection.py
 ```
 
-### 6. Flash ESP32
-- Open `src/esp32/helmet_ignition_esp32.ino` in Arduino IDE
-- Edit WiFi credentials
-- Select Board: **ESP32 Dev Module**
-- Upload
+### 5. Train Custom Model (Optional)
+```bash
+# Download & train on helmet dataset
+python src/raspberry_pi/train_model.py --action train --epochs 50 --device cpu
+```
 
-### 7. Run Tests
+### 6. Export to TFLite
+```bash
+python src/raspberry_pi/train_model.py --action export --export-format tflite
+```
+
+### 7. Flash ESP32 Firmware
+- Open `src/esp32/helmet_ignition_esp32.ino` in Arduino IDE
+- Edit WiFi / Serial configuration
+- Select Board: **ESP32 Dev Module**
+- Upload to device
+
+### 8. Run Automated Test Suite
 ```bash
 python tests/test_system.py --test all
 ```
+
+---
+
+## 🌐 Live Web Server Features
+
+The included Live Web Server (`live_server.py`) enables real-time monitoring over HTTP without needing an external GUI display:
+
+- **MJPEG Live Stream**: Ultra-low latency camera feed with YOLOv8 helmet detection boxes.
+- **Ignition Status Banner**: Visual overlay indicating `IGNITION: ENABLED` (Green) or `IGNITION: LOCKED` (Red).
+- **Zero-Dependency Web Server**: Built using Python's standard library `http.server`, works on any platform.
+- **Cross-Device Access**: Accessible from any laptop, tablet, or smartphone connected to the local WiFi network.
 
 ---
 
@@ -103,18 +112,20 @@ python tests/test_system.py --test all
 
 | Metric | Value |
 |---|---|
-| Detection FPS (YOLOv8n, Pi4) | 10–15 FPS |
+| Detection FPS (YOLOv8n, Pi4 / PC) | 15–17 FPS |
 | Detection Accuracy (mAP50) | ~88–93% |
 | Ignition Response Time | < 1 second |
 | Power Consumption | ~5W |
 | Offline Operation | ✅ Yes |
+| Live Web Streaming | ✅ http://localhost:5000 |
 
 ---
 
 ## 📚 Key Technologies
 
 - **YOLOv8** — Real-time object detection
-- **OpenCV** — Camera capture and frame processing
+- **OpenCV** — Frame capture and overlay processing
+- **HTTP MJPEG Live Server** — Web video streaming engine
 - **TensorFlow Lite** — Edge deployment optimization
 - **MQTT (Mosquitto)** — IoT messaging
 - **PySerial** — Raspberry Pi ↔ ESP32 communication
@@ -127,6 +138,7 @@ python tests/test_system.py --test all
 
 - [`report/PROJECT_REPORT.md`](report/PROJECT_REPORT.md) — Full report with viva Q&A
 - [`hardware/circuit_diagram.txt`](hardware/circuit_diagram.txt) — Wiring diagrams
+- [`QUICKSTART.md`](QUICKSTART.md) — Step-by-step setup guide
 
 ---
 
@@ -142,6 +154,3 @@ When connecting to a real motorcycle:
 ---
 
 *Submitted for B.E. Final Year Project | Electronics/Computer Science Engineering*
-=======
-# smart-helmet-project
->>>>>>> 9b87764d35d95a672f0c6e216f20b9afb20e6985

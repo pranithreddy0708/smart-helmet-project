@@ -26,6 +26,13 @@ logging.basicConfig(level=logging.INFO,
 logger = logging.getLogger(__name__)
 
 
+def get_model_path():
+    for p in ["models/helmet_yolov8n.pt", "runs/train/helmet_v1/weights/best.pt"]:
+        if Path(p).exists():
+            return p
+    return "models/helmet_yolov8n.pt"
+
+
 # ─────────────────────────────────────────────
 # 1. MODEL ACCURACY TEST
 # ─────────────────────────────────────────────
@@ -34,7 +41,7 @@ class TestModelAccuracy(unittest.TestCase):
 
     TEST_DIR    = "dataset/images/test"
     LABELS_DIR  = "dataset/labels/test"
-    MODEL_PATH  = "runs/train/helmet_v1/weights/best.pt"
+    MODEL_PATH  = get_model_path()
     IOU_THRESH  = 0.5
     CONF_THRESH = 0.70
 
@@ -107,7 +114,7 @@ class TestModelAccuracy(unittest.TestCase):
 class TestInferenceSpeed(unittest.TestCase):
     """Measures inference FPS on current hardware."""
 
-    MODEL_PATH  = "runs/train/helmet_v1/weights/best.pt"
+    MODEL_PATH  = get_model_path()
     ITERATIONS  = 30
     TARGET_FPS  = 5    # Minimum acceptable FPS on Raspberry Pi 4
 
@@ -214,7 +221,7 @@ class TestSerialCommunication(unittest.TestCase):
 class TestImageBenchmark(unittest.TestCase):
     """Tests helmet detection on known positive/negative images."""
 
-    MODEL_PATH = "runs/train/helmet_v1/weights/best.pt"
+    MODEL_PATH = get_model_path()
 
     @classmethod
     def setUpClass(cls):
@@ -273,7 +280,7 @@ def stress_test(duration_seconds: int = 60):
     try:
         from ultralytics import YOLO
         import psutil
-        model = YOLO("runs/train/helmet_v1/weights/best.pt")
+        model = YOLO(get_model_path())
     except Exception as e:
         logger.error(f"Stress test aborted: {e}")
         return
