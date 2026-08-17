@@ -6,11 +6,13 @@ A motorcycle ignition control system that uses **YOLOv8 object detection** to ve
 
 ---
 
-## 🌐 Live Deployed Server & Dashboard
+## 🌐 Live Web Telemetry Server Links
 
-- **Ultra-Fast Public Live Dashboard (Cloudflare Edge)**: **[https://delays-anybody-assign-programs.trycloudflare.com](https://delays-anybody-assign-programs.trycloudflare.com)**
-- **Public REST Telemetry API**: **[https://delays-anybody-assign-programs.trycloudflare.com/api/status](https://delays-anybody-assign-programs.trycloudflare.com/api/status)**
-- **Local Dashboard**: `http://localhost:5050`
+| Live Server Mode | Access URL / Link | Description |
+|---|---|---|
+| **🌐 Public Cloud Server** | **[https://delays-anybody-assign-programs.trycloudflare.com](https://delays-anybody-assign-programs.trycloudflare.com)** | Public Live Edge Dashboard (Zero-Lag QUIC Stream) |
+| **📊 REST Telemetry API** | **[https://delays-anybody-assign-programs.trycloudflare.com/api/status](https://delays-anybody-assign-programs.trycloudflare.com/api/status)** | Public JSON API Endpoint for Remote Mobile Apps |
+| **💻 Local Server** | **[http://localhost:5050](http://localhost:5050)** | Local Workstation Live Server Dashboard |
 
 ---
 
