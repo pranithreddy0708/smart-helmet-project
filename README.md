@@ -8,8 +8,8 @@ A motorcycle ignition control system that uses **YOLOv8 object detection** to ve
 
 ## 🌐 Live Deployed Server & Dashboard
 
-- **Public Live Dashboard**: **[https://chilly-sites-knock.loca.lt](https://chilly-sites-knock.loca.lt)**
-- **Public REST Telemetry API**: **[https://chilly-sites-knock.loca.lt/api/status](https://chilly-sites-knock.loca.lt/api/status)**
+- **Public Live Dashboard**: **[https://wise-stars-switch.loca.lt](https://wise-stars-switch.loca.lt)**
+- **Public REST Telemetry API**: **[https://wise-stars-switch.loca.lt/api/status](https://wise-stars-switch.loca.lt/api/status)**
 - **Local Dashboard**: `http://localhost:5050`
 
 ---
