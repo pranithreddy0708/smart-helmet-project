@@ -149,12 +149,13 @@ def camera_grabber_thread():
         t_prev = t1
         current_telemetry["fps"] = round(1.0 / dt if dt > 0 else 30.0, 1)
 
-        # Encode JPEG immediately (30 FPS, ZERO motion lag!)
-        _, jpeg = cv2.imencode('.jpg', ann_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        # Optimize stream payload for zero network tunnel lag (480x360 @ Quality 50)
+        stream_frame = cv2.resize(ann_frame, (480, 360))
+        _, jpeg = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
         with jpeg_frame_lock:
             latest_jpeg_frame = jpeg.tobytes()
 
-        time.sleep(0.005)
+        time.sleep(0.01)
 
 def ai_processing_thread():
     """Thread 2: Runs YOLOv8 inference asynchronously in background without blocking the video stream."""
