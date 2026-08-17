@@ -111,6 +111,19 @@ Expected behavior:
 
 ---
 
+## STEP 5 — Run Live Web Telemetry Dashboard
+
+```bash
+# Launch live web server locally and publicly
+python deploy.py --mode local --port 5050
+```
+
+- **Public Live Dashboard**: [https://c4c776310b3472.lhr.life](https://c4c776310b3472.lhr.life)
+- **Local Web Dashboard**: [http://localhost:5050](http://localhost:5050)
+- **REST Telemetry API**: [http://localhost:5050/api/status](http://localhost:5050/api/status)
+
+---
+
 ## CONFIGURATION REFERENCE
 
 Edit `CONFIG` in `helmet_detection.py`:
