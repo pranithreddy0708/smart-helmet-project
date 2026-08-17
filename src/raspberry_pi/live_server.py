@@ -1,6 +1,6 @@
 """
-Smart Helmet System — Zero-Lag Live Web Telemetry Server
-Features a dedicated 2-thread camera grabber & async AI engine for true 0ms motion latency.
+Smart Helmet System — Ultra-Low Latency Real-Time Telemetry Server
+Completely decouples 30 FPS camera streaming from AI inference for 0ms motion latency.
 
 Usage:
     python src/raspberry_pi/live_server.py --port 5050
@@ -45,11 +45,11 @@ current_telemetry = {
     "consecutive_helmet_frames": 0
 }
 
-# State Machine Constants & Performance Tuning
-CONFIDENCE_THRESHOLD = 0.78  # Strict threshold to eliminate false positives on bare head
-REQUIRED_HELMET_FRAMES = 4  # Fast response: 4 consecutive positive frames needed
-REQUIRED_NO_HELMET_FRAMES = 5 # Fast response: 5 consecutive miss frames to lock ignition
-INFERENCE_IMGSZ = 320         # 320x320 optimization for 10x faster CPU inference
+# State Machine & Performance Configuration
+CONFIDENCE_THRESHOLD = 0.78  # Strict threshold to eliminate false positives
+REQUIRED_HELMET_FRAMES = 4  # 4 consecutive frames required for ignition
+REQUIRED_NO_HELMET_FRAMES = 5 # 5 consecutive miss frames to lock
+INFERENCE_IMGSZ = 256         # 256x256 ultra-fast YOLO input size
 
 consecutive_helmet_count = 0
 consecutive_no_helmet_count = 0
@@ -58,6 +58,9 @@ ignition_enabled_state = False
 # Shared Thread Buffers
 raw_frame_lock = threading.Lock()
 latest_raw_frame = None
+
+detection_lock = threading.Lock()
+latest_boxes = []
 
 jpeg_frame_lock = threading.Lock()
 latest_jpeg_frame = None
@@ -83,7 +86,7 @@ def load_detection_model():
                     no_helmet_class_ids.add(cls_id)
                     logger.info(f"  ❌ NO-HELMET CLASS -> ID {cls_id} ('{name}')")
 
-            logger.info("Model initialized with zero-lag 2-thread processing architecture.")
+            logger.info("Model initialized with 0ms decoupled streaming architecture.")
         except Exception as e:
             logger.warning(f"Could not initialize YOLO model: {e}")
             current_telemetry["model_loaded"] = False
@@ -92,8 +95,8 @@ def load_detection_model():
         current_telemetry["model_loaded"] = False
 
 def camera_grabber_thread():
-    """Thread 1: Dedicated ultra-fast camera reader thread to continuously flush hardware buffer."""
-    global latest_raw_frame, camera_active
+    """Thread 1: Runs continuously at 30 FPS. Captures frames, overlays AI bounding boxes, and encodes MJPEG JPEG stream immediately."""
+    global latest_raw_frame, latest_jpeg_frame, camera_active
     
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -106,33 +109,68 @@ def camera_grabber_thread():
         return
     else:
         camera_active = True
-        logger.info("⚡ Zero-lag camera grabber thread active.")
+        logger.info("⚡ Real-time 30 FPS camera streaming thread active.")
+
+    t_prev = time.time()
 
     while True:
         ret, frame = cap.read()
-        if ret:
-            with raw_frame_lock:
-                latest_raw_frame = frame
-        else:
+        if not ret:
             time.sleep(0.01)
+            continue
+            
+        # Store for AI background thread
+        with raw_frame_lock:
+            latest_raw_frame = frame.copy()
+
+        # Render live frame with latest AI bounding box overlay
+        ann_frame = frame.copy()
+        with detection_lock:
+            boxes = list(latest_boxes)
+            ign_state = current_telemetry["ignition"]
+
+        for box in boxes:
+            x1, y1, x2, y2 = box["bbox"]
+            color = box["color"]
+            label = box["label"]
+            cv2.rectangle(ann_frame, (x1, y1), (x2, y2), color, 3)
+            cv2.putText(ann_frame, label, (x1, max(y1 - 10, 15)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+
+        # Draw Ignition Banner
+        status_text = f"IGNITION: {ign_state}"
+        banner_color = (0, 255, 0) if ign_state == "ENABLED" else (0, 0, 255)
+        cv2.rectangle(ann_frame, (0, 0), (ann_frame.shape[1], 40), (0, 0, 0), -1)
+        cv2.putText(ann_frame, status_text, (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, banner_color, 2)
+
+        # Compute camera stream FPS
+        t1 = time.time()
+        dt = t1 - t_prev
+        t_prev = t1
+        current_telemetry["fps"] = round(1.0 / dt if dt > 0 else 30.0, 1)
+
+        # Encode JPEG immediately (30 FPS, ZERO motion lag!)
+        _, jpeg = cv2.imencode('.jpg', ann_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        with jpeg_frame_lock:
+            latest_jpeg_frame = jpeg.tobytes()
+
+        time.sleep(0.005)
 
 def ai_processing_thread():
-    """Thread 2: Asynchronous AI inference, bounding box overlay, and JPEG encoding thread."""
-    global latest_jpeg_frame, current_telemetry, consecutive_helmet_count, consecutive_no_helmet_count, ignition_enabled_state
+    """Thread 2: Runs YOLOv8 inference asynchronously in background without blocking the video stream."""
+    global latest_boxes, current_telemetry, consecutive_helmet_count, consecutive_no_helmet_count, ignition_enabled_state
     
-    t_prev = time.time()
     sim_angle = 0.0
 
     while True:
         try:
-            frame = None
+            frame_to_process = None
             if camera_active:
                 with raw_frame_lock:
                     if latest_raw_frame is not None:
-                        frame = latest_raw_frame.copy()
-            
-            if frame is None:
-                # Synthetic animation fallback
+                        frame_to_process = latest_raw_frame.copy()
+            else:
+                # Synthetic animation fallback for headless testing
                 frame = np.zeros((480, 640, 3), dtype=np.uint8)
                 frame[:] = (20, 15, 10)
                 sim_angle += 0.08
@@ -154,13 +192,20 @@ def ai_processing_thread():
                     current_telemetry["ignition"] = "LOCKED"
                     current_telemetry["confidence"] = 0.0
 
-            if camera_active and model is not None:
-                fh, fw = frame.shape[:2]
+                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                with jpeg_frame_lock:
+                    latest_jpeg_frame = jpeg.tobytes()
+                time.sleep(0.04)
+                continue
+
+            if frame_to_process is not None and model is not None:
+                fh, fw = frame_to_process.shape[:2]
                 raw_helmet_found = False
                 highest_conf = 0.0
+                new_boxes = []
 
-                # Fast inference on 320x320 resized frame
-                results = model(frame, imgsz=INFERENCE_IMGSZ, conf=CONFIDENCE_THRESHOLD, verbose=False)
+                # Ultra-fast 256x256 inference
+                results = model(frame_to_process, imgsz=INFERENCE_IMGSZ, conf=CONFIDENCE_THRESHOLD, verbose=False)
                 for r in results:
                     for box in r.boxes:
                         cls_id = int(box.cls[0])
@@ -176,9 +221,11 @@ def ai_processing_thread():
                         )
 
                         if not is_helmet_class:
-                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                            cv2.putText(frame, f"No Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+                            new_boxes.append({
+                                "bbox": (x1, y1, x2, y2),
+                                "color": (0, 0, 255),
+                                "label": f"No Helmet {conf:.2f}"
+                            })
                             continue
 
                         # ── Strict Guard 2: Position check (must be upper 75% of frame) ──
@@ -193,9 +240,11 @@ def ai_processing_thread():
                         # Valid Helmet Detection!
                         raw_helmet_found = True
                         highest_conf = max(highest_conf, conf)
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                        cv2.putText(frame, f"Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+                        new_boxes.append({
+                            "bbox": (x1, y1, x2, y2),
+                            "color": (0, 255, 0),
+                            "label": f"Helmet {conf:.2f}"
+                        })
 
                 # State Machine Update
                 if raw_helmet_found:
@@ -210,34 +259,18 @@ def ai_processing_thread():
                 elif consecutive_no_helmet_count >= REQUIRED_NO_HELMET_FRAMES:
                     ignition_enabled_state = False
 
-                current_telemetry["helmet_detected"] = raw_helmet_found
-                current_telemetry["ignition"] = "ENABLED" if ignition_enabled_state else "LOCKED"
-                current_telemetry["confidence"] = float(highest_conf)
-                current_telemetry["consecutive_helmet_frames"] = consecutive_helmet_count
+                with detection_lock:
+                    latest_boxes = new_boxes
+                    current_telemetry["helmet_detected"] = raw_helmet_found
+                    current_telemetry["ignition"] = "ENABLED" if ignition_enabled_state else "LOCKED"
+                    current_telemetry["confidence"] = float(highest_conf)
+                    current_telemetry["consecutive_helmet_frames"] = consecutive_helmet_count
 
-            # FPS Computation
-            t1 = time.time()
-            dt = t1 - t_prev
-            t_prev = t1
-            fps = 1.0 / dt if dt > 0 else 0.0
-            current_telemetry["fps"] = round(fps, 1)
-
-            # Draw Status Overlay Banner
-            status_text = f"IGNITION: {current_telemetry['ignition']}"
-            color = (0, 255, 0) if current_telemetry['ignition'] == "ENABLED" else (0, 0, 255)
-            cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 0), -1)
-            cv2.putText(frame, status_text, (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-
-            # Encode JPEG to shared buffer
-            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
-            with jpeg_frame_lock:
-                latest_jpeg_frame = jpeg.tobytes()
-
-            time.sleep(0.005)
+            time.sleep(0.02)
 
         except Exception as e:
-            logger.error(f"Error in AI worker loop: {e}")
-            time.sleep(0.02)
+            logger.error(f"AI Worker error: {e}")
+            time.sleep(0.05)
 
 PAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -566,11 +599,11 @@ def main():
 
     load_detection_model()
 
-    # Start Thread 1: Camera Grabber Thread
+    # Start Thread 1: Camera Grabber Thread (encodes video at 30 FPS instantly)
     grabber = threading.Thread(target=camera_grabber_thread, daemon=True)
     grabber.start()
 
-    # Start Thread 2: AI Processing Thread
+    # Start Thread 2: AI Processing Thread (runs YOLO in background)
     ai_worker = threading.Thread(target=ai_processing_thread, daemon=True)
     ai_worker.start()
 
@@ -587,4 +620,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
