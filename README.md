@@ -2,7 +2,15 @@
 
 > **Final Year Engineering Project** | AI · IoT · Computer Vision · Embedded Systems · Cloud & Edge Deployment
 
-A motorcycle ignition control system that uses **YOLOv8 object detection** to verify helmet usage in real time. The bike **cannot start** unless the rider is wearing a helmet. Features a real-time web telemetry dashboard, Docker containerization, REST API, and GitHub CI/CD automation.
+A motorcycle ignition control system that uses **YOLOv8 object detection** to verify helmet usage in real time. The bike **cannot start** unless the rider is wearing a helmet. Features a real-time web telemetry dashboard, Docker containerization, REST API, public cloud deployment, and GitHub CI/CD automation.
+
+---
+
+## 🌐 Live Deployed Server & Dashboard
+
+- **Public Live Dashboard**: **[https://chilly-sites-knock.loca.lt](https://chilly-sites-knock.loca.lt)**
+- **Public REST Telemetry API**: **[https://chilly-sites-knock.loca.lt/api/status](https://chilly-sites-knock.loca.lt/api/status)**
+- **Local Dashboard**: `http://localhost:5050`
 
 ---
 
@@ -49,8 +57,8 @@ pip install -r requirements.txt
 # 2. Launch Live Telemetry Server & Web Dashboard
 python deploy.py --mode local --port 5050
 ```
-- Access Web Dashboard: **`http://localhost:5050`**
-- Access Network Stream: **`http://<SERVER_IP>:5050`**
+- Access Public Deployed Web Dashboard: **`https://chilly-sites-knock.loca.lt`**
+- Access Local Web Dashboard: **`http://localhost:5050`**
 - REST Telemetry API: **`http://localhost:5050/api/status`**
 
 ### Option 2: Docker Container Deployment
@@ -98,7 +106,7 @@ Returns real-time status of the helmet detection engine and ignition interlock s
   "ignition": "ENABLED",
   "helmet_detected": true,
   "confidence": 0.94,
-  "fps": 17.5,
+  "fps": 30.0,
   "active_clients": 1,
   "uptime_seconds": 182,
   "model_loaded": true
@@ -126,12 +134,12 @@ Returns real-time status of the helmet detection engine and ignition interlock s
 
 | Metric | Value |
 |---|---|
-| Detection FPS (YOLOv8n, Pi4 / PC) | 15–17 FPS |
+| Video Stream FPS | 30 FPS (Zero Motion Lag) |
 | Detection Accuracy (mAP50) | ~88–93% |
 | Ignition Response Time | < 1 second |
 | Power Consumption | ~5W |
-| Offline Operation | ✅ Yes |
-| Telemetry API | ✅ http://localhost:5050/api/status |
+| Deployed Public URL | ✅ https://chilly-sites-knock.loca.lt |
+| Telemetry API | ✅ https://chilly-sites-knock.loca.lt/api/status |
 
 ---
 
