@@ -1,6 +1,6 @@
 """
 Smart Helmet System — Ultra-Low Latency Real-Time Telemetry Server
-Completely decouples 30 FPS camera streaming from AI inference for 0ms motion latency.
+Features zero-buffer JavaScript frame loader and 30 FPS decoupled architecture for 0ms motion latency.
 
 Usage:
     python src/raspberry_pi/live_server.py --port 5050
@@ -86,7 +86,7 @@ def load_detection_model():
                     no_helmet_class_ids.add(cls_id)
                     logger.info(f"  ❌ NO-HELMET CLASS -> ID {cls_id} ('{name}')")
 
-            logger.info("Model initialized with 0ms decoupled streaming architecture.")
+            logger.info("Model initialized with zero-buffer streaming engine.")
         except Exception as e:
             logger.warning(f"Could not initialize YOLO model: {e}")
             current_telemetry["model_loaded"] = False
@@ -149,13 +149,13 @@ def camera_grabber_thread():
         t_prev = t1
         current_telemetry["fps"] = round(1.0 / dt if dt > 0 else 30.0, 1)
 
-        # Optimize stream payload for zero network tunnel lag (480x360 @ Quality 50)
+        # Optimize stream payload for zero network tunnel lag (480x360 @ Quality 55)
         stream_frame = cv2.resize(ann_frame, (480, 360))
-        _, jpeg = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        _, jpeg = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
         with jpeg_frame_lock:
             latest_jpeg_frame = jpeg.tobytes()
 
-        time.sleep(0.01)
+        time.sleep(0.005)
 
 def ai_processing_thread():
     """Thread 2: Runs YOLOv8 inference asynchronously in background without blocking the video stream."""
@@ -193,7 +193,7 @@ def ai_processing_thread():
                     current_telemetry["ignition"] = "LOCKED"
                     current_telemetry["confidence"] = 0.0
 
-                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
                 with jpeg_frame_lock:
                     latest_jpeg_frame = jpeg.tobytes()
                 time.sleep(0.04)
@@ -451,7 +451,7 @@ PAGE_HTML = """<!DOCTYPE html>
     <div class="dashboard-grid">
         <div class="video-card">
             <div class="video-wrapper">
-                <img src="/stream.mjpg" alt="Smart Helmet Camera Stream">
+                <img id="liveVideoFeed" src="/api/frame" alt="Smart Helmet Camera Stream">
             </div>
         </div>
 
@@ -503,6 +503,24 @@ PAGE_HTML = """<!DOCTYPE html>
     </footer>
 
     <script>
+        // High-Performance Zero-Buffer Frame Loader
+        let isFetchingFrame = false;
+        function updateLiveFrame() {
+            if (isFetchingFrame) return;
+            isFetchingFrame = true;
+            const imgElement = document.getElementById('liveVideoFeed');
+            const nextImg = new Image();
+            nextImg.src = '/api/frame?t=' + Date.now();
+            nextImg.onload = () => {
+                imgElement.src = nextImg.src;
+                isFetchingFrame = false;
+            };
+            nextImg.onerror = () => {
+                isFetchingFrame = false;
+            };
+        }
+        setInterval(updateLiveFrame, 35); // 30 FPS instant frame update
+
         async function fetchTelemetry() {
             try {
                 const res = await fetch('/api/status');
@@ -564,7 +582,23 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Length', str(len(json_bytes)))
             self.end_headers()
             self.wfile.write(json_bytes)
-            
+
+        elif self.path.startswith('/api/frame'):
+            with jpeg_frame_lock:
+                frame_bytes = latest_jpeg_frame
+
+            if frame_bytes is not None:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                self.send_header('Pragma', 'no-cache')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(frame_bytes)))
+                self.end_headers()
+                self.wfile.write(frame_bytes)
+            else:
+                self.send_error(503)
+
         elif self.path == '/stream.mjpg':
             self.send_response(200)
             self.send_header('Age', '0')
