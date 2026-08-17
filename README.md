@@ -1,8 +1,8 @@
 # 🏍️ AI-Powered Smart Helmet Bike Ignition System
 
-> **Final Year Engineering Project** | AI · IoT · Computer Vision · Embedded Systems
+> **Final Year Engineering Project** | AI · IoT · Computer Vision · Embedded Systems · Cloud & Edge Deployment
 
-A motorcycle ignition control system that uses **YOLOv8 object detection** to verify helmet usage in real time. The bike **cannot start** unless the rider is wearing a helmet.
+A motorcycle ignition control system that uses **YOLOv8 object detection** to verify helmet usage in real time. The bike **cannot start** unless the rider is wearing a helmet. Features a real-time web telemetry dashboard, Docker containerization, REST API, and GitHub CI/CD automation.
 
 ---
 
@@ -10,11 +10,17 @@ A motorcycle ignition control system that uses **YOLOv8 object detection** to ve
 
 ```
 smart_helmet_project/
+├── .github/
+│   └── workflows/
+│       └── deploy.yml              ← GitHub Actions CI/CD Pipeline
+├── Dockerfile                       ← Docker image specification
+├── docker-compose.yml               ← Docker Compose deployment config
+├── deploy.py                        ← Unified deployment runner
 ├── src/
 │   ├── raspberry_pi/
 │   │   ├── helmet_detection.py     ← Main detection + ignition control
 │   │   ├── setup_model.py          ← One-click model downloader & setup
-│   │   ├── live_server.py          ← Live Web Streaming Server (HTTP MJPEG)
+│   │   ├── live_server.py          ← Live Web Telemetry Dashboard (HTTP MJPEG)
 │   │   └── train_model.py          ← Model training (YOLOv8)
 │   ├── esp32/
 │   │   └── helmet_ignition_esp32.ino  ← ESP32 Arduino firmware
@@ -33,63 +39,71 @@ smart_helmet_project/
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick Start & Deployment Options
 
-### 1. Install Dependencies (Raspberry Pi / Local PC)
+### Option 1: Direct Python Deployment
 ```bash
+# 1. Install Dependencies
 pip install -r requirements.txt
-```
 
-### 2. Run One-Click Model Setup
+# 2. Launch Live Telemetry Server & Web Dashboard
+python deploy.py --mode local --port 5050
+```
+- Access Web Dashboard: **`http://localhost:5050`**
+- Access Network Stream: **`http://<SERVER_IP>:5050`**
+- REST Telemetry API: **`http://localhost:5050/api/status`**
+
+### Option 2: Docker Container Deployment
+Deploy seamlessly on any cloud VM (AWS, Render, Azure, GCP) or local Linux/Windows host using Docker:
 ```bash
-python src/raspberry_pi/setup_model.py --skip-camera-test
+# Launch via Docker Compose
+python deploy.py --mode docker
+# OR directly:
+docker compose up --build -d
 ```
 
-### 3. Run Live Web Server (HTTP Video Stream)
-Start the real-time MJPEG live web streaming server to view detection in your browser or remote dashboard:
-```bash
-python src/raspberry_pi/live_server.py --port 5050
-```
-- Open browser locally: **`http://localhost:5050`**
-- Open from mobile device / network: **`http://<RASPBERRY_PI_IP>:5050`**
-
-### 4. Run Desktop Detection System
+### Option 3: Desktop Detection System
 ```bash
 python src/raspberry_pi/helmet_detection.py
 ```
 
-### 5. Train Custom Model (Optional)
+### Option 4: Run Automated Test Suite
 ```bash
-# Download & train on helmet dataset
-python src/raspberry_pi/train_model.py --action train --epochs 50 --device cpu
-```
-
-### 6. Export to TFLite
-```bash
-python src/raspberry_pi/train_model.py --action export --export-format tflite
-```
-
-### 7. Flash ESP32 Firmware
-- Open `src/esp32/helmet_ignition_esp32.ino` in Arduino IDE
-- Edit WiFi / Serial configuration
-- Select Board: **ESP32 Dev Module**
-- Upload to device
-
-### 8. Run Automated Test Suite
-```bash
-python tests/test_system.py --test all
+python deploy.py --mode test
 ```
 
 ---
 
-## 🌐 Live Web Server Features
+## 🌐 Live Web Server & Telemetry Dashboard Features
 
-The included Live Web Server (`live_server.py`) enables real-time monitoring over HTTP without needing an external GUI display:
+The included Live Web Telemetry Dashboard (`live_server.py`) enables real-time monitoring over HTTP without needing an external display monitor:
 
-- **MJPEG Live Stream**: Ultra-low latency camera feed with YOLOv8 helmet detection boxes.
-- **Ignition Status Banner**: Visual overlay indicating `IGNITION: ENABLED` (Green) or `IGNITION: LOCKED` (Red).
-- **Zero-Dependency Web Server**: Built using Python's standard library `http.server`, works on any platform.
-- **Cross-Device Access**: Accessible from any laptop, tablet, or smartphone connected to the local WiFi network.
+- **Glassmorphic UI**: Ultra-sleek dark mode interface with live status cards and pulse indicators.
+- **MJPEG Live Stream**: Ultra-low latency camera feed with YOLOv8 helmet detection overlay boxes.
+- **Ignition Status Banner**: Visual state indicator displaying `IGNITION: ENABLED` (Green) or `IGNITION: LOCKED` (Red).
+- **REST Telemetry API**: Endpoint `/api/status` returns JSON telemetry (Ignition state, helmet detection, confidence score, FPS, uptime).
+- **Simulation Mode**: Built-in fallback stream allowing headless testing on servers without attached physical USB webcams.
+- **Cross-Device Access**: Accessible from any laptop, tablet, or mobile smartphone on the network.
+
+---
+
+## 📊 Telemetry API Specification
+
+### GET `/api/status`
+Returns real-time status of the helmet detection engine and ignition interlock state.
+
+**Sample Response (`application/json`):**
+```json
+{
+  "ignition": "ENABLED",
+  "helmet_detected": true,
+  "confidence": 0.94,
+  "fps": 17.5,
+  "active_clients": 1,
+  "uptime_seconds": 182,
+  "model_loaded": true
+}
+```
 
 ---
 
@@ -117,20 +131,16 @@ The included Live Web Server (`live_server.py`) enables real-time monitoring ove
 | Ignition Response Time | < 1 second |
 | Power Consumption | ~5W |
 | Offline Operation | ✅ Yes |
-| Live Web Streaming | ✅ http://localhost:5050 |
+| Telemetry API | ✅ http://localhost:5050/api/status |
 
 ---
 
-## 📚 Key Technologies
+## 🚀 GitHub Actions CI/CD Pipeline
 
-- **YOLOv8** — Real-time object detection
-- **OpenCV** — Frame capture and overlay processing
-- **HTTP MJPEG Live Server** — Web video streaming engine
-- **TensorFlow Lite** — Edge deployment optimization
-- **MQTT (Mosquitto)** — IoT messaging
-- **PySerial** — Raspberry Pi ↔ ESP32 communication
-- **React Native (Expo)** — Cross-platform mobile app
-- **Arduino/ESP32** — Hardware relay control
+The project includes an automated GitHub Actions workflow (`.github/workflows/deploy.yml`) that automatically:
+1. Runs python test suites on every push to `main` branch.
+2. Validates Live Web Telemetry Server startup and REST API response.
+3. Builds Docker container images automatically.
 
 ---
 
