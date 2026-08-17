@@ -28,7 +28,11 @@ if not Path(MODEL_PATH).exists():
     MODEL_PATH = "runs/train/helmet_v1/weights/best.pt"
 
 model = None
+model_names = {}
+helmet_class_ids = set()
+no_helmet_class_ids = set()
 server_start_time = time.time()
+
 current_telemetry = {
     "ignition": "LOCKED",
     "helmet_detected": False,
@@ -36,18 +40,40 @@ current_telemetry = {
     "fps": 0.0,
     "active_clients": 0,
     "uptime_seconds": 0,
-    "model_loaded": False
+    "model_loaded": False,
+    "consecutive_helmet_frames": 0
 }
 
+# State Machine Constants
+CONFIDENCE_THRESHOLD = 0.78  # Strict threshold to eliminate false positives on bare head
+REQUIRED_HELMET_FRAMES = 7  # Must detect helmet for 7 consecutive frames to enable ignition
+REQUIRED_NO_HELMET_FRAMES = 8 # Must miss helmet for 8 consecutive frames to lock ignition
+
+consecutive_helmet_count = 0
+consecutive_no_helmet_count = 0
+ignition_enabled_state = False
+
 def load_detection_model():
-    global model, current_telemetry
+    global model, model_names, helmet_class_ids, no_helmet_class_ids, current_telemetry
     if Path(MODEL_PATH).exists():
         try:
             from ultralytics import YOLO
             logger.info(f"Loading YOLOv8 model from {MODEL_PATH}...")
             model = YOLO(MODEL_PATH)
+            model_names = model.names
             current_telemetry["model_loaded"] = True
-            logger.info("Model loaded successfully!")
+            
+            logger.info("Model loaded. Class mapping:")
+            for cls_id, name in model_names.items():
+                name_lower = name.lower()
+                if ("helmet" in name_lower and "without" not in name_lower and "no" not in name_lower) or name_lower == "with helmet":
+                    helmet_class_ids.add(cls_id)
+                    logger.info(f"  ✅ HELMET CLASS -> ID {cls_id} ('{name}')")
+                else:
+                    no_helmet_class_ids.add(cls_id)
+                    logger.info(f"  ❌ NO-HELMET CLASS -> ID {cls_id} ('{name}')")
+
+            logger.info("Model initialized with strict class safety checks.")
         except Exception as e:
             logger.warning(f"Could not initialize YOLO model: {e}")
             current_telemetry["model_loaded"] = False
@@ -329,7 +355,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global current_telemetry
+        global current_telemetry, consecutive_helmet_count, consecutive_no_helmet_count, ignition_enabled_state
         if self.path == '/' or self.path == '/index.html':
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -390,29 +416,66 @@ class StreamHandler(BaseHTTPRequestHandler):
                             current_telemetry["ignition"] = "LOCKED"
                             current_telemetry["confidence"] = 0.0
                     else:
+                        fh, fw = frame.shape[:2]
+                        raw_helmet_found = False
+                        highest_conf = 0.0
+
                         if model is not None:
-                            results = model(frame, conf=0.70, verbose=False)
-                            helmet_found = False
-                            highest_conf = 0.0
+                            results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
                             for r in results:
                                 for box in r.boxes:
                                     cls_id = int(box.cls[0])
                                     conf = float(box.conf[0])
+                                    cls_name = model_names.get(cls_id, str(cls_id))
+                                    name_lower = cls_name.lower()
                                     x1, y1, x2, y2 = map(int, box.xyxy[0])
-                                    if cls_id == 0:
-                                        helmet_found = True
-                                        highest_conf = max(highest_conf, conf)
-                                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                                        cv2.putText(frame, f"Helmet {conf:.2f}", (x1, y1 - 10),
-                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                                    else:
-                                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                                        cv2.putText(frame, f"No Helmet {conf:.2f}", (x1, y1 - 10),
-                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                                    
+                                    # ── Strict Guard 1: Verify class is helmet & NOT 'without helmet' ──
+                                    is_helmet_class = (
+                                        ("helmet" in name_lower and "without" not in name_lower and "no" not in name_lower)
+                                        or name_lower == "with helmet"
+                                    )
 
-                            current_telemetry["helmet_detected"] = helmet_found
-                            current_telemetry["ignition"] = "ENABLED" if helmet_found else "LOCKED"
-                            current_telemetry["confidence"] = float(highest_conf)
+                                    if not is_helmet_class:
+                                        # Draw RED box for 'without helmet' or bare head detection
+                                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                                        cv2.putText(frame, f"No Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
+                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+                                        continue
+
+                                    # ── Strict Guard 2: Position check (must be upper 75% of frame) ──
+                                    center_y = (y1 + y2) / 2
+                                    if center_y > fh * 0.75:
+                                        continue
+
+                                    # ── Strict Guard 3: Minimum box dimension check ──
+                                    if (x2 - x1) < 40 or (y2 - y1) < 40:
+                                        continue
+
+                                    # Valid Helmet Detection!
+                                    raw_helmet_found = True
+                                    highest_conf = max(highest_conf, conf)
+                                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                                    cv2.putText(frame, f"Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
+                                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+
+                        # ── State Machine: Require 7 consecutive frames before enabling ignition ──
+                        if raw_helmet_found:
+                            consecutive_helmet_count += 1
+                            consecutive_no_helmet_count = 0
+                        else:
+                            consecutive_no_helmet_count += 1
+                            consecutive_helmet_count = 0
+
+                        if consecutive_helmet_count >= REQUIRED_HELMET_FRAMES:
+                            ignition_enabled_state = True
+                        elif consecutive_no_helmet_count >= REQUIRED_NO_HELMET_FRAMES:
+                            ignition_enabled_state = False
+
+                        current_telemetry["helmet_detected"] = raw_helmet_found
+                        current_telemetry["ignition"] = "ENABLED" if ignition_enabled_state else "LOCKED"
+                        current_telemetry["confidence"] = float(highest_conf)
+                        current_telemetry["consecutive_helmet_frames"] = consecutive_helmet_count
 
                     # Compute FPS
                     t1 = time.time()
