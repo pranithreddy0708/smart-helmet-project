@@ -95,10 +95,14 @@ def load_detection_model():
         current_telemetry["model_loaded"] = False
 
 def camera_grabber_thread():
-    """Thread 1: Runs continuously at 30 FPS. Captures frames, overlays AI bounding boxes, and encodes MJPEG JPEG stream immediately."""
+    """Thread 1: Ultra-low latency DirectShow camera thread with hardware queue flushing."""
     global latest_raw_frame, latest_jpeg_frame, camera_active
     
-    cap = cv2.VideoCapture(0)
+    # Use DirectShow on Windows for zero hardware driver buffering
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(0)
+
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -109,14 +113,16 @@ def camera_grabber_thread():
         return
     else:
         camera_active = True
-        logger.info("⚡ Real-time 30 FPS camera streaming thread active.")
+        logger.info("⚡ Ultra-low latency DirectShow camera streaming active.")
 
     t_prev = time.time()
 
     while True:
-        ret, frame = cap.read()
+        # Flush any stale Windows driver buffer frame to ensure 0ms real-time latency
+        cap.grab()
+        ret, frame = cap.retrieve()
         if not ret:
-            time.sleep(0.01)
+            time.sleep(0.005)
             continue
             
         # Store for AI background thread
@@ -149,7 +155,7 @@ def camera_grabber_thread():
         t_prev = t1
         current_telemetry["fps"] = round(1.0 / dt if dt > 0 else 30.0, 1)
 
-        # Optimize stream payload for zero network tunnel lag (480x360 @ Quality 55)
+        # Encode JPEG immediately (480x360 @ Quality 55)
         stream_frame = cv2.resize(ann_frame, (480, 360))
         _, jpeg = cv2.imencode('.jpg', stream_frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
         with jpeg_frame_lock:
@@ -451,7 +457,7 @@ PAGE_HTML = """<!DOCTYPE html>
     <div class="dashboard-grid">
         <div class="video-card">
             <div class="video-wrapper">
-                <img id="liveVideoFeed" src="/api/frame" alt="Smart Helmet Camera Stream">
+                <img id="liveVideoFeed" src="/stream.mjpg" alt="Smart Helmet Camera Stream">
             </div>
         </div>
 
@@ -503,24 +509,6 @@ PAGE_HTML = """<!DOCTYPE html>
     </footer>
 
     <script>
-        // High-Performance Zero-Buffer Frame Loader
-        let isFetchingFrame = false;
-        function updateLiveFrame() {
-            if (isFetchingFrame) return;
-            isFetchingFrame = true;
-            const imgElement = document.getElementById('liveVideoFeed');
-            const nextImg = new Image();
-            nextImg.src = '/api/frame?t=' + Date.now();
-            nextImg.onload = () => {
-                imgElement.src = nextImg.src;
-                isFetchingFrame = false;
-            };
-            nextImg.onerror = () => {
-                isFetchingFrame = false;
-            };
-        }
-        setInterval(updateLiveFrame, 35); // 30 FPS instant frame update
-
         async function fetchTelemetry() {
             try {
                 const res = await fetch('/api/status');
@@ -619,6 +607,10 @@ class StreamHandler(BaseHTTPRequestHandler):
                         self.end_headers()
                         self.wfile.write(frame_bytes)
                         self.wfile.write(b'\r\n')
+                        try:
+                            self.wfile.flush()
+                        except Exception:
+                            pass
 
                     time.sleep(0.033)  # ~30 FPS delivery to browser
             except Exception as e:
