@@ -8,8 +8,8 @@ A motorcycle ignition control system that uses **YOLOv8 object detection** to ve
 
 ## 🌐 Live Deployed Server & Dashboard
 
-- **Public Live Dashboard (Direct)**: **[https://c4c776310b3472.lhr.life](https://c4c776310b3472.lhr.life)**
-- **Public Live Dashboard (Localtunnel)**: **[https://wise-stars-switch.loca.lt](https://wise-stars-switch.loca.lt)** *(Passcode: `119.235.53.141`)*
+- **Ultra-Fast Public Live Dashboard (Cloudflare Edge)**: **[https://delays-anybody-assign-programs.trycloudflare.com](https://delays-anybody-assign-programs.trycloudflare.com)**
+- **Public REST Telemetry API**: **[https://delays-anybody-assign-programs.trycloudflare.com/api/status](https://delays-anybody-assign-programs.trycloudflare.com/api/status)**
 - **Local Dashboard**: `http://localhost:5050`
 
 ---
