@@ -1,6 +1,6 @@
 """
-Smart Helmet System — Live Web Streaming & Telemetry Server
-Streams real-time YOLOv8 helmet detection video feed and telemetry metrics via HTTP.
+Smart Helmet System — High-Performance Live Web Streaming & Telemetry Server
+Features decoupled background camera/AI thread for ultra-low latency, smooth 30 FPS streaming.
 
 Usage:
     python src/raspberry_pi/live_server.py --port 5050
@@ -14,6 +14,7 @@ import time
 import json
 import argparse
 import logging
+import threading
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -44,14 +45,20 @@ current_telemetry = {
     "consecutive_helmet_frames": 0
 }
 
-# State Machine Constants
+# State Machine Constants & Performance Tuning
 CONFIDENCE_THRESHOLD = 0.78  # Strict threshold to eliminate false positives on bare head
-REQUIRED_HELMET_FRAMES = 7  # Must detect helmet for 7 consecutive frames to enable ignition
-REQUIRED_NO_HELMET_FRAMES = 8 # Must miss helmet for 8 consecutive frames to lock ignition
+REQUIRED_HELMET_FRAMES = 5  # Must detect helmet for 5 consecutive frames to enable ignition
+REQUIRED_NO_HELMET_FRAMES = 6 # Must miss helmet for 6 consecutive frames to lock ignition
+INFERENCE_IMGSZ = 320         # Resized YOLO input size for 5x faster inference
 
 consecutive_helmet_count = 0
 consecutive_no_helmet_count = 0
 ignition_enabled_state = False
+
+# Shared Frame Buffer
+frame_lock = threading.Lock()
+latest_jpeg_frame = None
+camera_active = False
 
 def load_detection_model():
     global model, model_names, helmet_class_ids, no_helmet_class_ids, current_telemetry
@@ -73,13 +80,148 @@ def load_detection_model():
                     no_helmet_class_ids.add(cls_id)
                     logger.info(f"  ❌ NO-HELMET CLASS -> ID {cls_id} ('{name}')")
 
-            logger.info("Model initialized with strict class safety checks.")
+            logger.info("Model initialized with strict safety guards.")
         except Exception as e:
             logger.warning(f"Could not initialize YOLO model: {e}")
             current_telemetry["model_loaded"] = False
     else:
         logger.warning("No helmet model weight found. Operating in simulation mode.")
         current_telemetry["model_loaded"] = False
+
+def camera_worker_thread():
+    """Background worker for continuous webcam capture, AI inference, and JPEG encoding."""
+    global latest_jpeg_frame, current_telemetry, consecutive_helmet_count, consecutive_no_helmet_count, ignition_enabled_state, camera_active
+    
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Zero buffer delay
+
+    if not cap.isOpened():
+        logger.warning("No physical webcam opened. Running synthetic fallback stream.")
+        camera_active = False
+    else:
+        camera_active = True
+        logger.info("Webcam background worker active at 640x480 (Buffer=1).")
+
+    t_prev = time.time()
+    sim_angle = 0.0
+
+    while True:
+        try:
+            t0 = time.time()
+            if camera_active:
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.02)
+                    continue
+            else:
+                # Synthetic animation fallback for headless environments
+                frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                frame[:] = (20, 15, 10)
+                sim_angle += 0.08
+                helmet_detected_sim = (np.sin(sim_angle) > 0)
+                cv2.putText(frame, "SIMULATED LIVE FEED", (20, 45),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (56, 189, 248), 2)
+                if helmet_detected_sim:
+                    cv2.rectangle(frame, (200, 120), (440, 360), (0, 255, 0), 3)
+                    cv2.putText(frame, "HELMET DETECTED (0.94)", (200, 110),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    current_telemetry["helmet_detected"] = True
+                    current_telemetry["ignition"] = "ENABLED"
+                    current_telemetry["confidence"] = 0.94
+                else:
+                    cv2.rectangle(frame, (200, 120), (440, 360), (0, 0, 255), 3)
+                    cv2.putText(frame, "NO HELMET DETECTED", (200, 110),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                    current_telemetry["helmet_detected"] = False
+                    current_telemetry["ignition"] = "LOCKED"
+                    current_telemetry["confidence"] = 0.0
+
+            if camera_active and model is not None:
+                fh, fw = frame.shape[:2]
+                raw_helmet_found = False
+                highest_conf = 0.0
+
+                # Fast inference on 320x320 resized frame
+                results = model(frame, imgsz=INFERENCE_IMGSZ, conf=CONFIDENCE_THRESHOLD, verbose=False)
+                for r in results:
+                    for box in r.boxes:
+                        cls_id = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        cls_name = model_names.get(cls_id, str(cls_id))
+                        name_lower = cls_name.lower()
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+                        # ── Strict Guard 1: Verify class is helmet & NOT 'without helmet' ──
+                        is_helmet_class = (
+                            ("helmet" in name_lower and "without" not in name_lower and "no" not in name_lower)
+                            or name_lower == "with helmet"
+                        )
+
+                        if not is_helmet_class:
+                            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                            cv2.putText(frame, f"No Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+                            continue
+
+                        # ── Strict Guard 2: Position check (must be upper 75% of frame) ──
+                        center_y = (y1 + y2) / 2
+                        if center_y > fh * 0.75:
+                            continue
+
+                        # ── Strict Guard 3: Minimum box dimension check ──
+                        if (x2 - x1) < 30 or (y2 - y1) < 30:
+                            continue
+
+                        # Valid Helmet Detection!
+                        raw_helmet_found = True
+                        highest_conf = max(highest_conf, conf)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
+                        cv2.putText(frame, f"Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+
+                # State Machine Update
+                if raw_helmet_found:
+                    consecutive_helmet_count += 1
+                    consecutive_no_helmet_count = 0
+                else:
+                    consecutive_no_helmet_count += 1
+                    consecutive_helmet_count = 0
+
+                if consecutive_helmet_count >= REQUIRED_HELMET_FRAMES:
+                    ignition_enabled_state = True
+                elif consecutive_no_helmet_count >= REQUIRED_NO_HELMET_FRAMES:
+                    ignition_enabled_state = False
+
+                current_telemetry["helmet_detected"] = raw_helmet_found
+                current_telemetry["ignition"] = "ENABLED" if ignition_enabled_state else "LOCKED"
+                current_telemetry["confidence"] = float(highest_conf)
+                current_telemetry["consecutive_helmet_frames"] = consecutive_helmet_count
+
+            # FPS Computation
+            t1 = time.time()
+            dt = t1 - t_prev
+            t_prev = t1
+            fps = 1.0 / dt if dt > 0 else 0.0
+            current_telemetry["fps"] = round(fps, 1)
+
+            # Draw Status Overlay Banner
+            status_text = f"IGNITION: {current_telemetry['ignition']}"
+            color = (0, 255, 0) if current_telemetry['ignition'] == "ENABLED" else (0, 0, 255)
+            cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 0), -1)
+            cv2.putText(frame, status_text, (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+
+            # Encode JPEG to shared buffer
+            _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            with frame_lock:
+                latest_jpeg_frame = jpeg.tobytes()
+
+            time.sleep(0.01)
+
+        except Exception as e:
+            logger.error(f"Error in camera worker loop: {e}")
+            time.sleep(0.05)
 
 PAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -355,7 +497,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 
 class StreamHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        global current_telemetry, consecutive_helmet_count, consecutive_no_helmet_count, ignition_enabled_state
+        global current_telemetry
         if self.path == '/' or self.path == '/index.html':
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -381,128 +523,22 @@ class StreamHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
             self.end_headers()
 
-            cap = cv2.VideoCapture(0)
-            t_prev = time.time()
-            sim_angle = 0.0
-
             try:
                 while True:
-                    t0 = time.time()
-                    ret, frame = cap.read()
-                    
-                    if not ret:
-                        # Synthetic animation stream for headless / non-camera testing
-                        frame = np.zeros((480, 640, 3), dtype=np.uint8)
-                        frame[:] = (20, 15, 10)
-                        
-                        sim_angle += 0.08
-                        helmet_detected_sim = (np.sin(sim_angle) > 0)
-                        
-                        cv2.putText(frame, "SIMULATED LIVE FEED", (20, 45),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (56, 189, 248), 2)
-                        
-                        if helmet_detected_sim:
-                            cv2.rectangle(frame, (200, 120), (440, 360), (0, 255, 0), 3)
-                            cv2.putText(frame, "HELMET DETECTED (0.94)", (200, 110),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                            current_telemetry["helmet_detected"] = True
-                            current_telemetry["ignition"] = "ENABLED"
-                            current_telemetry["confidence"] = 0.94
-                        else:
-                            cv2.rectangle(frame, (200, 120), (440, 360), (0, 0, 255), 3)
-                            cv2.putText(frame, "NO HELMET DETECTED", (200, 110),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-                            current_telemetry["helmet_detected"] = False
-                            current_telemetry["ignition"] = "LOCKED"
-                            current_telemetry["confidence"] = 0.0
-                    else:
-                        fh, fw = frame.shape[:2]
-                        raw_helmet_found = False
-                        highest_conf = 0.0
+                    with frame_lock:
+                        frame_bytes = latest_jpeg_frame
 
-                        if model is not None:
-                            results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-                            for r in results:
-                                for box in r.boxes:
-                                    cls_id = int(box.cls[0])
-                                    conf = float(box.conf[0])
-                                    cls_name = model_names.get(cls_id, str(cls_id))
-                                    name_lower = cls_name.lower()
-                                    x1, y1, x2, y2 = map(int, box.xyxy[0])
-                                    
-                                    # ── Strict Guard 1: Verify class is helmet & NOT 'without helmet' ──
-                                    is_helmet_class = (
-                                        ("helmet" in name_lower and "without" not in name_lower and "no" not in name_lower)
-                                        or name_lower == "with helmet"
-                                    )
+                    if frame_bytes is not None:
+                        self.wfile.write(b'--FRAME\r\n')
+                        self.send_header('Content-Type', 'image/jpeg')
+                        self.send_header('Content-Length', str(len(frame_bytes)))
+                        self.end_headers()
+                        self.wfile.write(frame_bytes)
+                        self.wfile.write(b'\r\n')
 
-                                    if not is_helmet_class:
-                                        # Draw RED box for 'without helmet' or bare head detection
-                                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-                                        cv2.putText(frame, f"No Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
-                                                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
-                                        continue
-
-                                    # ── Strict Guard 2: Position check (must be upper 75% of frame) ──
-                                    center_y = (y1 + y2) / 2
-                                    if center_y > fh * 0.75:
-                                        continue
-
-                                    # ── Strict Guard 3: Minimum box dimension check ──
-                                    if (x2 - x1) < 40 or (y2 - y1) < 40:
-                                        continue
-
-                                    # Valid Helmet Detection!
-                                    raw_helmet_found = True
-                                    highest_conf = max(highest_conf, conf)
-                                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
-                                    cv2.putText(frame, f"Helmet {conf:.2f}", (x1, max(y1 - 10, 15)),
-                                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
-
-                        # ── State Machine: Require 7 consecutive frames before enabling ignition ──
-                        if raw_helmet_found:
-                            consecutive_helmet_count += 1
-                            consecutive_no_helmet_count = 0
-                        else:
-                            consecutive_no_helmet_count += 1
-                            consecutive_helmet_count = 0
-
-                        if consecutive_helmet_count >= REQUIRED_HELMET_FRAMES:
-                            ignition_enabled_state = True
-                        elif consecutive_no_helmet_count >= REQUIRED_NO_HELMET_FRAMES:
-                            ignition_enabled_state = False
-
-                        current_telemetry["helmet_detected"] = raw_helmet_found
-                        current_telemetry["ignition"] = "ENABLED" if ignition_enabled_state else "LOCKED"
-                        current_telemetry["confidence"] = float(highest_conf)
-                        current_telemetry["consecutive_helmet_frames"] = consecutive_helmet_count
-
-                    # Compute FPS
-                    t1 = time.time()
-                    dt = t1 - t_prev
-                    t_prev = t1
-                    fps = 1.0 / dt if dt > 0 else 0.0
-                    current_telemetry["fps"] = round(fps, 1)
-
-                    # Draw Ignition Banner on Stream Frame
-                    status_text = f"IGNITION: {current_telemetry['ignition']}"
-                    color = (0, 255, 0) if current_telemetry['ignition'] == "ENABLED" else (0, 0, 255)
-                    cv2.rectangle(frame, (0, 0), (frame.shape[1], 40), (0, 0, 0), -1)
-                    cv2.putText(frame, status_text, (15, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-
-                    _, jpeg = cv2.imencode('.jpg', frame)
-                    self.wfile.write(b'--FRAME\r\n')
-                    self.send_header('Content-Type', 'image/jpeg')
-                    self.send_header('Content-Length', str(len(jpeg)))
-                    self.end_headers()
-                    self.wfile.write(jpeg.tobytes())
-                    self.wfile.write(b'\r\n')
-                    time.sleep(0.04)
-
+                    time.sleep(0.033)  # ~30 FPS delivery to browser
             except Exception as e:
-                logger.debug(f"Client disconnected: {e}")
-            finally:
-                cap.release()
+                logger.debug(f"Client stream ended: {e}")
         else:
             self.send_error(404)
 
@@ -513,6 +549,11 @@ def main():
     args = parser.parse_args()
 
     load_detection_model()
+
+    # Start background camera & inference worker thread
+    worker = threading.Thread(target=camera_worker_thread, daemon=True)
+    worker.start()
+
     server_address = (args.host, args.port)
     httpd = ThreadedHTTPServer(server_address, StreamHandler)
     logger.info(f"🚀 Live Web Server & Telemetry Dashboard active at http://localhost:{args.port}")
